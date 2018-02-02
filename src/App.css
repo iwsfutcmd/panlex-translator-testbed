@@ -1,0 +1,5 @@
+.trn-columns {
+    display: flex;
+    inline-size: 100%;
+    justify-content: space-around;
+}

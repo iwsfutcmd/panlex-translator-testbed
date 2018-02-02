@@ -1,0 +1,20 @@
+.trn-list {
+  list-style-type: none;
+}
+
+.trn-row {
+  display: flex;
+}
+
+.bon-bar-background {
+  display: flex;
+  justify-content: flex-end;
+  inline-size: 100px;
+  background-color: lightgrey;
+  margin: 1px;
+}
+
+.bon-bar-foreground {
+  block-size: 100%;
+  background-color: darkred;
+}
