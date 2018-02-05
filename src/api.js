@@ -1,6 +1,19 @@
+import pnormaldist from "pnormaldist";
+
 const VERSION = 2
 const APISERVER = 'https://api.panlex.org'
 const URLBASE = (VERSION === 2) ? APISERVER + '/v2' : APISERVER
+
+let highScoreCache = {};
+
+function wilsonScore(score, maxScore, confidence) {
+  let z = pnormaldist(1 - (1 - confidence) / 2);
+  let p = score / maxScore;
+  let left = p + 1 / (2 * maxScore) * z**2;
+  let right = z * Math.sqrt(p * (1 - p) / maxScore + z**2 / (4 * maxScore**2));
+  let under = 1 + 1 / maxScore * z**2;
+  return (left - right) / under;
+}
 
 function query(ep, params) {
   let url = URLBASE + ep
@@ -19,7 +32,6 @@ function getTranslations(txt, uidDe, uidAl, distance = 0) {
     include: ['trans_quality', 'trans_txt', 'trans_langvar'],
     sort: 'trans_quality desc',
   };
-  // if (typeof txt === 'number' || txt.every(v => typeof v === 'number')) {
   if (Array.prototype.every.call(txt, v => typeof v === 'number')) {
     queryOne.trans_expr = txt
   } else {
@@ -47,6 +59,20 @@ function getTranslations(txt, uidDe, uidAl, distance = 0) {
         {url: '/expr', query: queryTwo},
       ]}).then(responseData => responseData.result))
   }
+}
+
+function getNormTranslations(txt, lvDe, lvAl, wilson = 0) {
+  let lvPair = [parseInt(lvDe, 10), parseInt(lvAl, 10)].sort((a,b) => a - b);
+  let p = !(highScoreCache[lvPair[0]] && highScoreCache[lvPair[0]][lvPair[1]]) ? getHighScores([lvPair]) : Promise.resolve();
+  return(p.then(() => {
+    return(getTranslations(txt, lvDe, lvAl, 1).then(r => {
+      let highScore = highScoreCache[lvPair[0]][lvPair[1]];
+      return(r.map(trn => Object.assign(trn, {
+        norm_quality: wilsonScore(trn.trans_quality, highScore, wilson),
+        high_score: highScore,
+      })))
+    }))
+  }))
 }
 
 function getTransPath(exprDe, exprAl) {
@@ -108,4 +134,25 @@ function getAllTranslations(uidDe, uidAl, byId = false) {
     )
   )
 }
-export { query, getTranslations, getTransPath, getMultTranslations, getAllTranslations }
+
+function getHighScores(lvPairs) {
+  let idParams = [];
+  let uidParams = [];
+  lvPairs.forEach(lvPair => {
+    let idPair = [parseInt(lvPair[0], 10), parseInt(lvPair[1], 10)];
+    if (!isNaN(idPair[0]) && !isNaN(idPair[1])) {
+      idParams.push(idPair);
+    } else {
+      uidParams.push(lvPair);
+    }
+  })
+  return(query("/langvar_pair", {ids: idParams, uids: uidParams}).then(r => {
+    r.result.forEach(lvPair => {
+      let langvars = [lvPair.langvar1, lvPair.langvar2].sort((a,b) => a - b);
+      if (!highScoreCache[langvars[0]]) {highScoreCache[langvars[0]] = {}};
+      highScoreCache[langvars[0]][langvars[1]] = lvPair.max_quality_d1;
+    })
+  }));
+}
+
+export { wilsonScore, query, getTranslations, getTransPath, getMultTranslations, getAllTranslations, getNormTranslations }

@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
 
-import { query, getTranslations, getMultTranslations, getTransPath, getAllTranslations } from './api';
+import { query, getTranslations, getNormTranslations } from './api';
 
 import TrnList from './TrnList';
 
@@ -12,28 +12,38 @@ class App extends Component {
     this.state = {
       txt0: "",
       txt1: "",
-      lngDe0: "",
-      lngDe1: "",
-      lngAl0: "",
-      lngAl1: "",
+      uidDe0: localStorage.getItem("uidDe") || "",
+      lvDe0: parseInt(localStorage.getItem("lvDe"), 10) || NaN,
+      uidDe1: "",
+      lvDe1: NaN,
+      uidAl0: "",
+      lvAl0: NaN,
+      uidAl1: "",
+      lvAl1: NaN,
       translations: [],
       translations0: [],
       translations1: [],
       translations01: [],
       highScores: {},
+      lvCache: new Map(),
+      confidence: 0,
     }
   }
   
+  componentDidMount() {
+    this.cacheLvs();
+  }
+
   translate = event => {
     try {
       event.preventDefault();
     } catch (e) {}
-    this.getHighScores(this.state.lngDe0, this.state.lngAl);
-    return getTranslations(this.state.txt0.trim(), this.state.lngDe0, this.state.lngAl0)
+    // this.getHighScores(this.state.lngDe0, this.state.lngAl);
+    return getNormTranslations(this.state.txt0.trim(), this.state.lvDe0, this.state.lvAl0)
       .then(result => {
-        result.forEach(trn => {
-          trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
-        })
+        // result.forEach(trn => {
+        //   trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
+        // })
         this.setState({translations: result});
       })
   }
@@ -42,10 +52,10 @@ class App extends Component {
     try {
       event.preventDefault();
     } catch (e) {}
-    this.getHighScores(this.state.lngDe0, this.state.lngAl);
-    this.getHighScores(this.state.lngDe1, this.state.lngAl);
-    let pt0 = getTranslations(this.state.txt0.trim(), this.state.lngDe0, this.state.lngAl0);
-    let pt1 = getTranslations(this.state.txt1.trim(), this.state.lngDe1, this.state.lngAl0);
+    this.getHighScores(this.state.lvDe0, this.state.lvAl);
+    this.getHighScores(this.state.lvDe1, this.state.lvAl);
+    let pt0 = getTranslations(this.state.txt0.trim(), this.state.lvDe0, this.state.lvAl0);
+    let pt1 = getTranslations(this.state.txt1.trim(), this.state.lvDe1, this.state.lvAl0);
     pt0.then(r0 => pt1.then(r1 => {
       let translations0 = [], translations1 = [], translations01 = [];
       r0.forEach(trn => {
@@ -66,35 +76,49 @@ class App extends Component {
 
   toMultTranslate = event => {
     try {event.preventDefault()} catch (e) {}
-    this.getHighScores(this.state.lngDe0, this.state.lngAl0);
-    this.getHighScores(this.state.lngDe0, this.state.lngAl1);
-    let pt0 = getTranslations(this.state.txt0.trim(), this.state.lngDe0, this.state.lngAl0, 1);
-    let pt1 = getTranslations(this.state.txt0.trim(), this.state.lngDe0, this.state.lngAl1, 1);
+    // this.getHighScores([[this.state.lvDe0, this.state.lvAl0], [this.state.lvDe0, this.state.lvAl1]]);
+    let pt0 = getNormTranslations(this.state.txt0.trim(), this.state.lvDe0, this.state.lvAl0, .95);
+    let pt1 = getNormTranslations(this.state.txt0.trim(), this.state.lvDe0, this.state.lvAl1, .95);
     pt0.then(r0 => pt1.then(r1 => {
-      r0.forEach(trn => {
-        trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
-      })
-      r1.forEach(trn => {
-        trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
-      })
+      // r0.forEach(trn => {
+      //   trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
+      // })
+      // r1.forEach(trn => {
+      //   trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
+      // })
+      localStorage.setItem("uidDe", this.state.uidDe0);
+      localStorage.setItem("lvDe", this.state.lvDe0);
       this.setState({translations: [...r0, ...r1].sort((a, b) => b.norm_quality - a.norm_quality)});
     }))
   }
 
-  getHighScores = (lv1, lv2) => {
-    let highScores = this.state.highScores;
-    query(["/langvar_pair", lv1, lv2].join("/"), {}).then(r => {
-      let langvars = [r.langvar_pair.langvar1, r.langvar_pair.langvar2].sort((a,b) => a - b);
-      if (!highScores[langvars[0]]) {highScores[langvars[0]] = {}};
-      highScores[langvars[0]][langvars[1]] = r.langvar_pair.max_quality_d1;
-      this.setState({highScores});
-    })
-  }
+  cacheLvs = () => (
+    query('/langvar', {limit: 0, exclude: [
+      'grp', 
+      'lang_code', 
+      'mutable', 
+      'name_expr',
+      'name_expr_txt_degr',
+      'var_code',
+     ]}).then(
+      r => {
+        let lvCache = new Map();
+        r.result.forEach(lv => {lvCache.set(lv.uid, lv)});
+        this.setState({lvCache});
+      })
+  )
 
-  highScore = (lv1, lv2) => {
-    let langvars = [lv1, lv2].sort((a,b) => a - b);
-    return(this.state.highScores[langvars[0]][langvars[1]]);
+  uid2LvId = uid => {
+    try {
+      return(this.state.lvCache.get(uid).id);
+    } catch (e) {
+      return(0);
+    }
   }
+  // highScore = (lv1, lv2) => {
+  //   let langvars = [lv1, lv2].sort((a,b) => a - b);
+  //   return(this.state.highScores[langvars[0]][langvars[1]]);
+  // }
 
   trnToggle = trnNum => {
     if (!this.state.translations[trnNum].backTranslations) {
@@ -104,11 +128,11 @@ class App extends Component {
 
   backTranslate = trnNum => {
     let trn = this.state.translations[trnNum];
-    getTranslations(trn.txt, trn.langvar, trn.trans_langvar)
+    getNormTranslations(trn.txt, parseInt(trn.langvar, 10), parseInt(trn.trans_langvar, 10))
       .then(result => {
-        result.forEach(trn => {
-          trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
-        });
+        // result.forEach(trn => {
+        //   trn.norm_quality = trn.trans_quality / this.highScore(trn.langvar, trn.trans_langvar);
+        // });
         let translations = this.state.translations;
         translations[trnNum].backTranslations = result;
         this.setState({translations})
@@ -131,8 +155,11 @@ class App extends Component {
             lng de0
             <input
               type="text"
-              onChange={event => {this.setState({lngDe0: event.target.value})}}
-              value={this.state.lngDe0}
+              onChange={event => {
+                let uid = event.target.value;
+                this.setState({uidDe0: uid, lvDe0: this.uid2LvId(uid)});
+              }}
+              value={this.state.uidDe0}
             />
           </label>
         </div>
@@ -149,8 +176,11 @@ class App extends Component {
             lng de1
             <input
               type="text"
-              onChange={event => {this.setState({lngDe1: event.target.value})}}
-              value={this.state.lngDe1}
+              onChange={event => {
+                let uid = event.target.value;
+                this.setState({uidDe1: uid, lvDe1: this.uid2LvId(uid)});
+              }}
+              value={this.state.uidDe1}
             />
           </label>
         </div>
@@ -158,20 +188,33 @@ class App extends Component {
           lng al0
           <input
             type="text"
-            onChange={event => {this.setState({lngAl0: event.target.value})}}
-            value={this.state.lngAl0}
+            onChange={event => {
+              let uid = event.target.value;
+              this.setState({uidAl0: uid, lvAl0: this.uid2LvId(uid)});
+            }}
+            value={this.state.uidAl0}
           />
         </label>
         <label>
           lng al1
           <input
             type="text"
-            onChange={event => {this.setState({lngAl1: event.target.value})}}
-            value={this.state.lngAl1}
+            onChange={event => {
+              let uid = event.target.value;
+              this.setState({uidAl1: uid, lvAl1: this.uid2LvId(uid)});
+            }}
+            value={this.state.uidAl1}
           />
         </label>
         <button onClick={this.toMultTranslate} type="submit">tra</button>
-        <TrnList translations={this.state.translations} trnToggle={this.trnToggle}/>
+        <div>
+          <input 
+            type="range" max="1" min="0" step="0.01"
+            onChange={event => {this.setState({confidence: event.target.value})}}
+            value={this.state.confidence}
+          />
+        </div>
+        <TrnList translations={this.state.translations} trnToggle={this.trnToggle} confidence={this.state.confidence}/>
         <div className="trn-columns">
           <TrnList translations={this.state.translations0}/>
           {/* <TrnList translations={this.state.translations01}/> */}
